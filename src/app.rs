@@ -21,7 +21,7 @@ use crate::workspace::{Suite, Workspace};
 struct TestEntry {
     case: TestCase,
     status: TestStatus,
-    output: Vec<OutputLine>,
+    output: Output,
     duration: Option<Duration>,
     /// GoogleTest cases reported by the last run.
     cases: Vec<CaseResult>,
@@ -38,6 +38,14 @@ impl TestEntry {
             _ => true,
         }
     }
+}
+
+/// Test output joined into a single text so that it can be selected and copied as a whole.
+#[derive(Default)]
+struct Output {
+    text: String,
+    /// Styled parts of `text`, with byte ranges relative to the whole text.
+    segments: Vec<Segment>,
 }
 
 /// A line of test output split into differently styled parts.
@@ -122,7 +130,7 @@ impl CtguiApp {
                         .map(|case| TestEntry {
                             status: initial_status(&case),
                             case,
-                            output: Vec::new(),
+                            output: Output::default(),
                             duration: None,
                             cases: Vec::new(),
                         })
@@ -514,8 +522,20 @@ impl CtguiApp {
         }
         if entry.output.is_empty() {
             ui.label(RichText::new("(no output)").monospace().weak());
-        } else if let Some(location) = output_view(ui, &entry.output) {
-            open = Some(location);
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Output").strong());
+                if ui
+                    .button("Copy all")
+                    .on_hover_text("Copy the whole output to the clipboard")
+                    .clicked()
+                {
+                    ui.ctx().copy_text(entry.output.text.clone());
+                }
+            });
+            if let Some(location) = output_view(ui, &entry.output) {
+                open = Some(location);
+            }
         }
         if let Some(location) = open {
             self.notice = editor::open(&location).err();
@@ -540,6 +560,87 @@ impl eframe::App for CtguiApp {
 
 /// Color of plain text in the details panel.
 const TEXT_COLOR: Color32 = Color32::from_gray(240);
+
+impl Output {
+    fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
+        self.segments.clear();
+    }
+
+    /// Appends a line, separated from the previous one by a newline.
+    fn push(&mut self, line: OutputLine) {
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        let offset = self.text.len();
+        self.text.push_str(&line.text);
+        self.segments
+            .extend(line.segments.into_iter().map(|s| Segment {
+                range: s.range.start + offset..s.range.end + offset,
+                ..s
+            }));
+    }
+
+    /// Builds the colored layout of the whole text, underlining source locations.
+    fn layout_job(&self, font_id: egui::FontId) -> egui::text::LayoutJob {
+        let format = |color: Color32, link: bool| egui::TextFormat {
+            font_id: font_id.clone(),
+            color,
+            underline: if link {
+                egui::Stroke::new(1.0, color)
+            } else {
+                egui::Stroke::NONE
+            },
+            ..Default::default()
+        };
+        let mut job = egui::text::LayoutJob {
+            wrap: egui::text::TextWrapping::no_max_width(),
+            ..Default::default()
+        };
+        let mut push = |range: Range<usize>, format: egui::TextFormat| {
+            if !range.is_empty() {
+                job.append(&self.text[range], 0.0, format);
+            }
+        };
+        let mut pos = 0;
+        for segment in &self.segments {
+            push(pos..segment.range.start, format(TEXT_COLOR, false));
+            push(
+                segment.range.clone(),
+                format(segment.color, segment.link.is_some()),
+            );
+            pos = segment.range.end;
+        }
+        push(pos..self.text.len(), format(TEXT_COLOR, false));
+        job
+    }
+
+    /// Returns the source location under `pos`, given relative to the top-left of `galley`.
+    fn link_at(&self, galley: &egui::Galley, pos: egui::Vec2) -> Option<&Location> {
+        if !galley.rect.contains(pos.to_pos2()) {
+            return None;
+        }
+        let mut cursor = galley.cursor_from_pos(pos);
+        // The cursor is the nearest character boundary, so step back when the pointer is on the
+        // right half of the previous character.
+        if pos.x < galley.pos_from_cursor(cursor).min.x && cursor.index.0 > 0 {
+            cursor.index.0 -= 1;
+        }
+        let byte = self
+            .text
+            .char_indices()
+            .nth(cursor.index.0)
+            .map(|(i, _)| i)?;
+        self.segments
+            .iter()
+            .find(|s| s.range.contains(&byte))
+            .and_then(|s| s.link.as_ref())
+    }
+}
 
 impl OutputLine {
     /// Splits a line into plain text, result keywords, and source locations.
@@ -644,32 +745,42 @@ fn cases_view(ui: &mut egui::Ui, cases: &[CaseResult]) -> Option<Location> {
     clicked
 }
 
-/// Shows test output, one row per line, and returns the location the user clicked.
-fn output_view(ui: &mut egui::Ui, lines: &[OutputLine]) -> Option<Location> {
+/// Shows test output as selectable text and returns the location the user clicked.
+fn output_view(ui: &mut egui::Ui, output: &Output) -> Option<Location> {
+    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+    let mut layouter = |ui: &egui::Ui, _text: &dyn egui::TextBuffer, _wrap_width: f32| {
+        ui.fonts_mut(|f| f.layout_job(output.layout_job(font_id.clone())))
+    };
+    let mut text = output.text.as_str();
     let mut clicked = None;
-    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
-    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-    ui.spacing_mut().interact_size.y = row_height;
     egui::ScrollArea::both()
         .auto_shrink([false, false])
         .stick_to_bottom(true)
-        .show_rows(ui, row_height, lines.len(), |ui, rows| {
-            for line in &lines[rows] {
-                ui.horizontal(|ui| {
-                    for segment in &line.segments {
-                        let text = RichText::new(&line.text[segment.range.clone()])
-                            .monospace()
-                            .color(segment.color);
-                        let Some(location) = &segment.link else {
-                            ui.add(egui::Label::new(text).extend());
-                            continue;
-                        };
-                        if location_link(ui, text, location) {
-                            clicked = Some(location.clone());
-                        }
-                    }
-                });
+        .show(ui, |ui| {
+            let edit = egui::TextEdit::multiline(&mut text)
+                .id_salt("output")
+                .frame(egui::Frame::NONE)
+                .margin(0.0)
+                .desired_width(f32::INFINITY)
+                .min_size(ui.available_size())
+                .layouter(&mut layouter)
+                .show(ui);
+            let response = &edit.response.response;
+            let Some(pointer) = response.hover_pos() else {
+                return;
+            };
+            let Some(location) = output.link_at(&edit.galley, pointer - edit.galley_pos) else {
+                return;
+            };
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                clicked = Some(location.clone());
             }
+            response.clone().on_hover_text_at_pointer(format!(
+                "Open {}:{} in editor",
+                location.path.display(),
+                location.line
+            ));
         });
     clicked
 }
@@ -755,5 +866,22 @@ mod tests {
             .unwrap();
         assert_eq!(failed.color, status_color(TestStatus::Failed));
         assert!(line.segments.iter().all(|s| s.link.is_none()));
+    }
+
+    #[test]
+    fn joins_output_lines_and_offsets_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.cpp"), "").unwrap();
+
+        let mut output = Output::default();
+        output.push(OutputLine::new("first\n", &[tmp.path()]));
+        output.push(OutputLine::new("a.cpp:28: CHECK failed\n", &[tmp.path()]));
+        assert_eq!(output.text, "first\na.cpp:28: CHECK failed");
+        let link = output.segments.iter().find(|s| s.link.is_some()).unwrap();
+        assert_eq!(&output.text[link.range.clone()], "a.cpp:28");
+        assert_eq!(
+            output.layout_job(egui::FontId::monospace(12.0)).text,
+            output.text
+        );
     }
 }

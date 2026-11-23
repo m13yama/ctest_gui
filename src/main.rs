@@ -7,8 +7,9 @@ mod location;
 mod runner;
 mod workspace;
 
-use std::path::PathBuf;
-use std::process::ExitCode;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode, Stdio};
 
 use eframe::egui;
 
@@ -17,10 +18,16 @@ use crate::workspace::Workspace;
 const USAGE: &str = "Usage: ctgui [PATH]
 
 Open a GUI to discover and run ctest tests.
-PATH is a CMake project root, a CMake build directory, or a colcon workspace (default: .).";
+PATH is a CMake project root, a CMake build directory, or a colcon workspace (default: .).
+
+Options:
+  -f, --foreground  Keep running attached to the terminal instead of in the background
+  -h, --help        Print this help
+  -V, --version     Print the version";
 
 fn main() -> ExitCode {
     let mut path: Option<PathBuf> = None;
+    let mut foreground = false;
     for arg in std::env::args_os().skip(1) {
         match arg.to_str() {
             Some("-h" | "--help") => {
@@ -31,6 +38,7 @@ fn main() -> ExitCode {
                 println!("ctgui {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
             }
+            Some("-f" | "--foreground") => foreground = true,
             _ if path.is_none() => path = Some(PathBuf::from(arg)),
             _ => {
                 eprintln!("{USAGE}");
@@ -48,6 +56,15 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    if !foreground {
+        match detach(&root) {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => eprintln!(
+                "ctgui: failed to start in the background, staying in the foreground: {e}"
+            ),
+        }
+    }
 
     let title = format!("ctgui - {}", root.display());
     let options = eframe::NativeOptions {
@@ -72,4 +89,26 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Starts the GUI as a new session detached from the terminal, like `code .` does.
+///
+/// The workspace is detected before this so that errors are still reported in the terminal.
+fn detach(root: &Path) -> std::io::Result<()> {
+    let mut cmd = Command::new(std::env::current_exe()?);
+    cmd.arg("--foreground")
+        .arg(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: setsid is async-signal-safe and touches no memory of the parent.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    cmd.spawn().map(drop)
 }
