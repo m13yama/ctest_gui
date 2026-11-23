@@ -28,13 +28,13 @@
 - The following command installs the latest version from GitHub Releases into `~/.local/bin`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/ctest_gui/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/m13yama/ctest_gui/main/install.sh | sh
 ```
 
 - You can uninstall it with the following command.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/ctest_gui/main/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/m13yama/ctest_gui/main/install.sh | sh -s -- --uninstall
 ```
 
 ## Features

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs ctgui from GitHub Releases.
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/ctest_gui/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/m13yama/ctest_gui/main/install.sh | sh
 #
 # Options (pass after `sh -s --` when piping):
 #   --version <tag>   install a specific release (e.g. v0.1.0) instead of the latest
@@ -12,7 +12,7 @@
 
 set -eu
 
-REPO="${CTGUI_REPO:-OWNER/ctest_gui}"
+REPO="${CTGUI_REPO:-m13yama/ctest_gui}"
 VERSION="${CTGUI_VERSION:-latest}"
 INSTALL_DIR="${CTGUI_INSTALL_DIR:-$HOME/.local/bin}"
 # Base URL of the release assets; can be overridden to use a mirror.
