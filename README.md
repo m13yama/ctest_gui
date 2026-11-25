@@ -25,13 +25,15 @@
 
 ## Installation
 
-- The following command installs the latest version from GitHub Releases into `~/.local/bin`.
+- The following command installs the latest version from GitHub Releases into `~/.local/bin` and adds **CTest GUI** to your applications menu.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/m13yama/ctest_gui/main/install.sh | sh
 ```
 
-- You can uninstall it with the following command.
+- Open **CTest GUI** and use the Zenity folder picker to select a CMake project, build directory, or colcon workspace.
+- If the folder picker is missing, install it with `sudo apt install zenity`.
+- The following command removes the executable, menu entry, and installed icon.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/m13yama/ctest_gui/main/install.sh | sh -s -- --uninstall

@@ -44,7 +44,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist package
-          cp target/release/ctgui README.md LICENSE-MIT LICENSE-APACHE package/
+          cp target/release/ctgui assets/icon.png README.md LICENSE-MIT LICENSE-APACHE package/
           asset="ctgui-${{ matrix.target }}.tar.gz"
           tar -czf "dist/${asset}" -C package .
           (cd dist && sha256sum "${asset}" > "${asset}.sha256")
