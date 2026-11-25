@@ -17,7 +17,8 @@ VERSION="${CTGUI_VERSION:-latest}"
 INSTALL_DIR="${CTGUI_INSTALL_DIR:-$HOME/.local/bin}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 DESKTOP_FILE="$DATA_DIR/applications/ctgui.desktop"
-ICON_FILE="$DATA_DIR/icons/hicolor/256x256/apps/ctgui.png"
+ICON_THEME_DIR="$DATA_DIR/icons/hicolor"
+ICON_FILE="$ICON_THEME_DIR/256x256/apps/ctgui.png"
 # Base URL of the release assets; can be overridden to use a mirror.
 BASE_URL="${CTGUI_BASE_URL:-https://github.com/$REPO/releases}"
 UNINSTALL=0
@@ -26,6 +27,15 @@ info() { printf '\033[1;32mctgui:\033[0m %s\n' "$*"; }
 error() {
     printf '\033[1;31mctgui:\033[0m %s\n' "$*" >&2
     exit 1
+}
+
+refresh_icon_theme() {
+    # Notify icon theme watchers even when only a nested apps directory changed.
+    touch -- "$ICON_THEME_DIR"
+    if [ -f "$ICON_THEME_DIR/icon-theme.cache" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache --force --ignore-theme-index "$ICON_THEME_DIR" ||
+            info "could not rebuild the icon cache in $ICON_THEME_DIR"
+    fi
 }
 
 while [ $# -gt 0 ]; do
@@ -72,8 +82,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
         rm -f -- "$DESKTOP_FILE"
         info "removed $DESKTOP_FILE"
     fi
-    if [ ! -e "$DESKTOP_FILE" ]; then
+    if [ ! -e "$DESKTOP_FILE" ] && [ -f "$ICON_FILE" ]; then
         rm -f -- "$ICON_FILE"
+        refresh_icon_theme
     fi
     rm -f -- "$INSTALL_DIR/ctgui-desktop"
     if [ -e "$INSTALL_DIR/ctgui" ]; then
@@ -143,7 +154,10 @@ icon=applications-development
 if [ -f "$TMP_DIR/icon.png" ]; then
     install -Dm644 "$TMP_DIR/icon.png" "$ICON_FILE"
 fi
-[ ! -f "$ICON_FILE" ] || icon=ctgui
+if [ -f "$ICON_FILE" ]; then
+    refresh_icon_theme
+    icon=ctgui
+fi
 
 cat > "$TMP_DIR/ctgui-desktop" <<'EOF'
 #!/bin/sh
